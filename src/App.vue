@@ -91,6 +91,21 @@
         </div>
       </section>
 
+      <section class="demo panel">
+        <div class="demo-header">
+          <div>
+            <p class="eyebrow accent">Playable demo</p>
+            <h2>Mini marble platformer</h2>
+          </div>
+          <div class="demo-actions">
+            <button @click="resetDemo">Reset</button>
+            <button class="secondary" @click="toggleDemo">{{ demoRunning ? 'Pause' : 'Play' }}</button>
+          </div>
+        </div>
+
+        <canvas ref="canvasRef" class="game-canvas" width="900" height="420" aria-label="PlatinumQuest mini game demo"></canvas>
+      </section>
+
       <section class="results-grid">
         <article v-for="level in levels" :key="level.id" class="level-card panel" @click="openLevel(level.id)">
           <div class="card-header">
@@ -112,8 +127,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import type { LevelRecord } from '../server/data/levels';
+import { mountMarbleDemo } from './game/MarbleGame';
 
 const levels = ref<LevelRecord[]>([]);
 const featured = ref<LevelRecord[]>([]);
@@ -121,6 +137,10 @@ const selectedLevel = ref<LevelRecord | null>(null);
 const query = ref('');
 const difficulty = ref('');
 const tag = ref('');
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+const demoRunning = ref(true);
+
+let demoController: ReturnType<typeof mountMarbleDemo> | null = null;
 
 async function fetchJson(url: string): Promise<any> {
   const res = await fetch(url);
@@ -160,9 +180,33 @@ async function downloadLevel(id: string) {
   link.click();
 }
 
+function resetDemo() {
+  demoController?.reset();
+}
+
+function toggleDemo() {
+  if (!demoController) return;
+  demoRunning.value = !demoRunning.value;
+  demoController.setRunning(demoRunning.value);
+}
+
+watch(
+  canvasRef,
+  (canvas) => {
+    if (!canvas) return;
+    demoController = mountMarbleDemo(canvas);
+    demoController.setRunning(demoRunning.value);
+  },
+  { flush: 'post' }
+);
+
 onMounted(async () => {
   await loadFeatured();
   await refresh();
+});
+
+onBeforeUnmount(() => {
+  demoController?.destroy();
 });
 </script>
 
@@ -249,9 +293,11 @@ h2 {
   line-height: 1.5;
 }
 
-.hero-actions {
+.hero-actions,
+.demo-actions {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 button {
@@ -286,6 +332,27 @@ input, select {
   color: #edf7ff;
   padding: 12px 14px;
   font: inherit;
+}
+
+.demo {
+  padding: 18px;
+}
+
+.demo-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.game-canvas {
+  width: 100%;
+  height: 420px;
+  display: block;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: linear-gradient(180deg, #8ed4ff 0%, #d4f0ff 36%, #dfeccf 100%);
 }
 
 .featured-grid,
