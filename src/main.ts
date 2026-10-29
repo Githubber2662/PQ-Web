@@ -1,7 +1,5 @@
-import { Game } from "./game/Game";
+import { createApp } from 'vue';
+import App from './App.vue';
+import './styles.css';
 
-const app = document.getElementById("app");
-if (!app) throw new Error("App root not found");
-
-const game = new Game(app);
-await game.start();
+createApp(App).mount('#app');
