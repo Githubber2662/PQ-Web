@@ -8,6 +8,7 @@
       <div class="header-actions">
         <a class="brand-link" href="/" aria-label="Home">Marbleland</a>
         <button class="secondary small" @click="focusUpload">Upload level</button>
+        <button class="secondary small" @click="toggleAuthPanel">{{ isLoggedIn ? 'Profile' : 'Login' }}</button>
       </div>
     </header>
 
@@ -24,6 +25,35 @@
         <div class="hero-actions">
           <button @click="loadFeatured">Featured</button>
           <button class="secondary" @click="loadAll">Browse all</button>
+        </div>
+      </section>
+
+      <section v-if="authOpen" class="auth panel">
+        <div class="auth-grid">
+          <div>
+            <p class="eyebrow accent">Account</p>
+            <h3>{{ isLoggedIn ? 'User profile' : 'Login / sign up' }}</h3>
+          </div>
+
+          <form v-if="!isLoggedIn" class="auth-form" @submit.prevent="submitAuth">
+            <input v-model="authUsername" placeholder="Username" />
+            <input v-model="authPassword" type="password" placeholder="Password" />
+            <div class="auth-actions">
+              <button type="submit">Login</button>
+              <button class="secondary" type="button" @click="signup">Sign up</button>
+            </div>
+          </form>
+
+          <div v-else class="profile-box">
+            <div class="profile-row">
+              <img :src="user.avatar" class="avatar" alt="User avatar" />
+              <div>
+                <strong>{{ user.username }}</strong>
+                <span>Unlocked: {{ saveState.unlockedLevels.length }} levels</span>
+              </div>
+            </div>
+            <button class="secondary" @click="logout">Log out</button>
+          </div>
         </div>
       </section>
 
@@ -47,6 +77,26 @@
           <option value="boost">Boost</option>
           <option value="arena">Arena</option>
         </select>
+      </section>
+
+      <section class="mission-pack panel">
+        <div class="mission-header">
+          <div>
+            <p class="eyebrow accent">Mission packs</p>
+            <h3>Featured packs</h3>
+          </div>
+        </div>
+        <div class="pack-grid">
+          <article v-for="pack in packs" :key="pack.id" class="pack-card">
+            <div class="pack-badge">{{ pack.cover }}</div>
+            <h4>{{ pack.name }}</h4>
+            <p>{{ pack.description }}</p>
+            <div class="meta-row">
+              <span>{{ pack.totalLevels }} levels</span>
+              <span>{{ pack.author }}</span>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section v-if="featured.length" class="featured-grid">
@@ -183,11 +233,18 @@ const scoreGems = ref(0);
 const scoreTotal = ref(0);
 const checkpointLabel = ref('Start');
 const currentLevel = ref(0);
+const authOpen = ref(false);
+const authUsername = ref('');
+const authPassword = ref('');
+const isLoggedIn = ref(false);
+const user = ref({ id: '', username: '', avatar: '' });
+const saveState = ref({ unlockedLevels: ['marble-bridge'], bestTimes: {}, completedLevels: [], medalCounts: { gold: 0, silver: 0, bronze: 0 } });
+const packs = ref<any[]>([]);
 
 let demoController: ReturnType<typeof mountMarbleDemo> | null = null;
 
-async function fetchJson(url: string): Promise<any> {
-  const res = await fetch(url);
+async function fetchJson(url: string, options?: RequestInit): Promise<any> {
+  const res = await fetch(url, options);
   if (!res.ok) throw new Error('Request failed');
   return res.json();
 }
@@ -210,6 +267,11 @@ async function refresh() {
 
 async function loadAll() {
   await refresh();
+}
+
+async function loadPacks() {
+  const response = await fetchJson('/api/mission-packs');
+  packs.value = response.items;
 }
 
 async function openLevel(id: string) {
@@ -245,6 +307,65 @@ function focusUpload() {
   uploadInput.value?.click();
 }
 
+function toggleAuthPanel() {
+  authOpen.value = !authOpen.value;
+}
+
+async function submitAuth() {
+  const token = await fetchJson('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: authUsername.value, password: authPassword.value })
+  });
+
+  localStorage.setItem('pq-token', token.token);
+  isLoggedIn.value = true;
+  user.value = token.user;
+  authOpen.value = true;
+  authUsername.value = '';
+  authPassword.value = '';
+  await loadSaveState();
+}
+
+async function signup() {
+  const token = await fetchJson('/api/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: authUsername.value, password: authPassword.value })
+  });
+
+  localStorage.setItem('pq-token', token.token);
+  isLoggedIn.value = true;
+  user.value = token.user;
+  authOpen.value = true;
+  authUsername.value = '';
+  authPassword.value = '';
+  await loadSaveState();
+}
+
+function logout() {
+  localStorage.removeItem('pq-token');
+  isLoggedIn.value = false;
+  user.value = { id: '', username: '', avatar: '' };
+  saveState.value = { unlockedLevels: ['marble-bridge'], bestTimes: {}, completedLevels: [], medalCounts: { gold: 0, silver: 0, bronze: 0 } };
+}
+
+async function loadSaveState() {
+  const token = localStorage.getItem('pq-token');
+  if (!token) return;
+
+  try {
+    const response = await fetchJson('/api/saves/me', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    saveState.value = response.saves;
+    isLoggedIn.value = true;
+    user.value = response.user ?? user.value;
+  } catch {
+    logout();
+  }
+}
+
 async function uploadLevel(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return;
@@ -253,7 +374,7 @@ async function uploadLevel(event: Event) {
   const record: LevelRecord = {
     id: payload.id ?? `custom-${Date.now()}`,
     name: payload.name ?? file.name.replace(/\.[^.]+$/, ''),
-    author: payload.author ?? 'Local uploader',
+    author: payload.author ?? (user.value.username || 'Local uploader'),
     description: payload.description ?? 'Uploaded custom level',
     tags: payload.tags ?? ['custom', 'community'],
     difficulty: payload.difficulty ?? 'normal',
@@ -265,9 +386,13 @@ async function uploadLevel(event: Event) {
     createdAt: new Date().toISOString().slice(0, 10)
   };
 
+  const token = localStorage.getItem('pq-token');
   await fetch('/api/levels/upload', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
     body: JSON.stringify(record)
   });
 
@@ -300,6 +425,11 @@ watch(
 onMounted(async () => {
   await loadFeatured();
   await refresh();
+  await loadPacks();
+  const existingToken = localStorage.getItem('pq-token');
+  if (existingToken) {
+    await loadSaveState();
+  }
 });
 
 onBeforeUnmount(() => {
@@ -350,7 +480,7 @@ onBeforeUnmount(() => {
   color: #7ef0ff;
 }
 
-h1, h2, h3, p {
+h1, h2, h3, h4, p {
   margin: 0;
 }
 
@@ -397,7 +527,8 @@ h2 {
 }
 
 .hero-actions,
-.demo-actions {
+.demo-actions,
+.auth-actions {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
@@ -425,6 +556,42 @@ button.small {
   font-size: 0.9rem;
 }
 
+.auth {
+  padding: 18px 20px;
+}
+
+.auth-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+}
+
+.profile-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: 1.4fr 0.7fr 0.8fr;
@@ -440,6 +607,38 @@ input, select {
   color: #edf7ff;
   padding: 12px 14px;
   font: inherit;
+}
+
+.mission-pack {
+  padding: 18px;
+}
+
+.pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.pack-card {
+  display: grid;
+  gap: 10px;
+  border-radius: 14px;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.pack-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-weight: 800;
+  background: rgba(126,240,255,0.12);
+  border: 1px solid rgba(126,240,255,0.22);
 }
 
 .demo {
@@ -646,7 +845,8 @@ input, select {
   .hero,
   .detail-flex,
   .toolbar,
-  .topbar {
+  .topbar,
+  .auth-form {
     grid-template-columns: 1fr;
     display: grid;
   }
@@ -657,7 +857,8 @@ input, select {
 
   .hero-actions,
   .detail-actions,
-  .header-actions {
+  .header-actions,
+  .auth-actions {
     flex-direction: column;
   }
 

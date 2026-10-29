@@ -1,17 +1,96 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
-import { addUploadedLevel, featuredLevels, levelById, levels } from './data/levels.ts';
+import {
+  addUploadedLevel,
+  featuredLevels,
+  levelById,
+  levels,
+  defaultLevels,
+  type LevelRecord,
+  type UserRecord,
+  type SaveState
+} from './data/levels.ts';
 
 const app = express();
 const port = Number(process.env.PORT ?? 8080);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-app.use(express.json());
+const USERS: UserRecord[] = [];
+const SESSIONS = new Map<string, { userId: string; expiresAt: number }>();
+
+const createToken = () => crypto.randomBytes(32).toString('hex');
+const authMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  if (!token) {
+    res.status(401).json({ error: 'Missing auth token' });
+    return;
+  }
+
+  const session = SESSIONS.get(token);
+  if (!session || session.expiresAt < Date.now()) {
+    res.status(401).json({ error: 'Session expired' });
+    return;
+  }
+
+  (req as any).user = USERS.find((user) => user.id === session.userId) ?? null;
+  next();
+};
+
+app.use(express.json({ limit: '10mb' }));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'pq-web-api', version: '1.1.0' });
+  res.json({ ok: true, service: 'pq-web-api', version: '1.2.0' });
+});
+
+app.post('/api/auth/signup', (req, res) => {
+  const { username, password } = req.body ?? {};
+  if (!username || !password || String(username).trim().length < 3 || String(password).length < 4) {
+    res.status(400).json({ error: 'Username and password are required.' });
+    return;
+  }
+
+  if (USERS.some((user) => user.username.toLowerCase() === String(username).toLowerCase())) {
+    res.status(409).json({ error: 'Username already exists.' });
+    return;
+  }
+
+  const user: UserRecord = {
+    id: crypto.randomUUID(),
+    username: String(username).trim(),
+    passwordHash: crypto.createHash('sha256').update(String(password)).digest('hex'),
+    createdAt: new Date().toISOString(),
+    avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(String(username))}`
+  };
+
+  USERS.push(user);
+  const token = createToken();
+  SESSIONS.set(token, { userId: user.id, expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 7 });
+
+  res.status(201).json({ token, user: { id: user.id, username: user.username, avatar: user.avatar } });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body ?? {};
+  const user = USERS.find((entry) => entry.username.toLowerCase() === String(username ?? '').toLowerCase());
+  const hash = crypto.createHash('sha256').update(String(password ?? '')).digest('hex');
+
+  if (!user || user.passwordHash !== hash) {
+    res.status(401).json({ error: 'Invalid credentials.' });
+    return;
+  }
+
+  const token = createToken();
+  SESSIONS.set(token, { userId: user.id, expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 7 });
+
+  res.json({ token, user: { id: user.id, username: user.username, avatar: user.avatar } });
+});
+
+app.get('/api/me', authMiddleware, (req, res) => {
+  const user = (req as any).user as UserRecord;
+  res.json({ user: { id: user.id, username: user.username, avatar: user.avatar } });
 });
 
 app.get('/api/levels', (req, res) => {
@@ -67,18 +146,18 @@ app.get('/api/levels/:id/download', (req, res) => {
   res.send(JSON.stringify(level, null, 2));
 });
 
-app.post('/api/levels/upload', (req, res) => {
-  const record = req.body;
+app.post('/api/levels/upload', authMiddleware, (req, res) => {
+  const record = req.body ?? {};
 
   if (!record || typeof record !== 'object') {
     res.status(400).json({ error: 'Invalid level payload' });
     return;
   }
 
-  const cleanRecord = {
+  const cleanRecord: LevelRecord = {
     id: String(record.id ?? `custom-${Date.now()}`),
     name: String(record.name ?? 'Custom level'),
-    author: String(record.author ?? 'Local uploader'),
+    author: String(record.author ?? (req as any).user.username),
     description: String(record.description ?? 'Uploaded custom mission'),
     tags: Array.isArray(record.tags) ? record.tags.map(String) : ['custom'],
     difficulty: ['easy', 'normal', 'hard', 'expert'].includes(String(record.difficulty))
@@ -94,6 +173,68 @@ app.post('/api/levels/upload', (req, res) => {
 
   const item = addUploadedLevel(cleanRecord);
   res.status(201).json(item);
+});
+
+app.get('/api/mission-packs', (_req, res) => {
+  res.json({
+    items: [
+      {
+        id: 'starter-pack',
+        name: 'Starter Mission Pack',
+        author: 'PQ-Web',
+        description: 'A curated early set of beginner and intermediate levels.',
+        tags: ['starter', 'beginner'],
+        totalLevels: defaultLevels.length,
+        featured: true,
+        cover: 'starter'
+      },
+      {
+        id: 'precision-pack',
+        name: 'Precision Mission Pack',
+        author: 'Qube',
+        description: 'Tighter routes, harder timing, and more deliberate score chasing.',
+        tags: ['precision', 'hard'],
+        totalLevels: 4,
+        featured: false,
+        cover: 'precision'
+      }
+    ]
+  });
+});
+
+app.get('/api/saves/me', authMiddleware, (req, res) => {
+  const user = (req as any).user as UserRecord;
+  const saves = (globalThis as any).__PQ_SAVE_STATE__ ?? {};
+  const userSave = saves[user.id] ?? {
+    unlockedLevels: ['marble-bridge'],
+    bestTimes: {},
+    completedLevels: [],
+    medalCounts: { gold: 0, silver: 0, bronze: 0 }
+  };
+  res.json({ saves: userSave });
+});
+
+app.post('/api/saves/me', authMiddleware, (req, res) => {
+  const user = (req as any).user as UserRecord;
+  const payload = req.body ?? {};
+  const saves = ((globalThis as any).__PQ_SAVE_STATE__ ??= {});
+  const current = saves[user.id] ?? {
+    unlockedLevels: ['marble-bridge'],
+    bestTimes: {},
+    completedLevels: [],
+    medalCounts: { gold: 0, silver: 0, bronze: 0 }
+  };
+
+  saves[user.id] = {
+    ...current,
+    ...payload,
+    unlockedLevels: Array.isArray(payload.unlockedLevels) ? payload.unlockedLevels : current.unlockedLevels,
+    bestTimes: payload.bestTimes ?? current.bestTimes,
+    completedLevels: Array.isArray(payload.completedLevels) ? payload.completedLevels : current.completedLevels,
+    medalCounts: payload.medalCounts ?? current.medalCounts
+  };
+
+  res.json({ saves: saves[user.id] });
 });
 
 app.use(express.static(path.join(__dirname, '../dist')));
