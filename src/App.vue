@@ -5,7 +5,10 @@
         <p class="eyebrow">Marble Blast + PlatinumQuest</p>
         <h1>PQ-Web</h1>
       </div>
-      <a class="brand-link" href="/" aria-label="Home">Marbleland</a>
+      <div class="header-actions">
+        <a class="brand-link" href="/" aria-label="Home">Marbleland</a>
+        <button class="secondary small" @click="focusUpload">Upload level</button>
+      </div>
     </header>
 
     <main class="content">
@@ -103,7 +106,41 @@
           </div>
         </div>
 
+        <div class="hud-row">
+          <div class="hud-item">
+            <span>Level</span>
+            <strong>{{ currentLevel + 1 }}</strong>
+          </div>
+          <div class="hud-item">
+            <span>Gems</span>
+            <strong>{{ scoreGems }} / {{ scoreTotal }}</strong>
+          </div>
+          <div class="hud-item">
+            <span>Timer</span>
+            <strong>{{ formatTime(gameTimer) }}</strong>
+          </div>
+          <div class="hud-item">
+            <span>Checkpoint</span>
+            <strong>{{ checkpointLabel }}</strong>
+          </div>
+          <div class="hud-item accent">
+            <span>Status</span>
+            <strong>{{ gameStatus }}</strong>
+          </div>
+        </div>
+
         <canvas ref="canvasRef" class="game-canvas" width="900" height="420" aria-label="PlatinumQuest mini game demo"></canvas>
+      </section>
+
+      <section class="upload-panel panel">
+        <div class="upload-header">
+          <div>
+            <p class="eyebrow accent">Community upload</p>
+            <h3>Import a custom level JSON</h3>
+          </div>
+          <input ref="uploadInput" type="file" accept="application/json" @change="uploadLevel" hidden />
+        </div>
+        <p class="muted">The server accepts a JSON level document and adds it to the local Marbleland-style catalog.</p>
       </section>
 
       <section class="results-grid">
@@ -129,7 +166,7 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import type { LevelRecord } from '../server/data/levels';
-import { mountMarbleDemo } from './game/MarbleGame';
+import { mountMarbleDemo, type DemoState } from './game/MarbleGame';
 
 const levels = ref<LevelRecord[]>([]);
 const featured = ref<LevelRecord[]>([]);
@@ -138,7 +175,14 @@ const query = ref('');
 const difficulty = ref('');
 const tag = ref('');
 const canvasRef = ref<HTMLCanvasElement | null>(null);
+const uploadInput = ref<HTMLInputElement | null>(null);
 const demoRunning = ref(true);
+const gameStatus = ref('Ready');
+const gameTimer = ref(0);
+const scoreGems = ref(0);
+const scoreTotal = ref(0);
+const checkpointLabel = ref('Start');
+const currentLevel = ref(0);
 
 let demoController: ReturnType<typeof mountMarbleDemo> | null = null;
 
@@ -190,11 +234,64 @@ function toggleDemo() {
   demoController.setRunning(demoRunning.value);
 }
 
+function formatTime(totalSeconds: number) {
+  const sec = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(sec / 60);
+  const secs = sec % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function focusUpload() {
+  uploadInput.value?.click();
+}
+
+async function uploadLevel(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+
+  const payload = JSON.parse(await file.text()) as Partial<LevelRecord>;
+  const record: LevelRecord = {
+    id: payload.id ?? `custom-${Date.now()}`,
+    name: payload.name ?? file.name.replace(/\.[^.]+$/, ''),
+    author: payload.author ?? 'Local uploader',
+    description: payload.description ?? 'Uploaded custom level',
+    tags: payload.tags ?? ['custom', 'community'],
+    difficulty: payload.difficulty ?? 'normal',
+    time: payload.time ?? 45,
+    gems: payload.gems ?? 3,
+    size: payload.size ?? 'Custom',
+    featured: false,
+    thumbnail: payload.thumbnail ?? 'custom',
+    createdAt: new Date().toISOString().slice(0, 10)
+  };
+
+  await fetch('/api/levels/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record)
+  });
+
+  levels.value = [record, ...levels.value];
+  featured.value = levels.value.slice(0, 3);
+  selectedLevel.value = record;
+
+  (event.target as HTMLInputElement).value = '';
+}
+
+const handleDemoState = (state: DemoState) => {
+  gameStatus.value = state.status;
+  gameTimer.value = state.timer;
+  scoreGems.value = state.collectedGems;
+  scoreTotal.value = state.totalGems;
+  checkpointLabel.value = state.checkpoint >= 0 ? `CP ${state.checkpoint + 1}` : 'Start';
+  currentLevel.value = state.levelIndex;
+};
+
 watch(
   canvasRef,
   (canvas) => {
     if (!canvas) return;
-    demoController = mountMarbleDemo(canvas);
+    demoController = mountMarbleDemo(canvas, { onState: handleDemoState });
     demoController.setRunning(demoRunning.value);
   },
   { flush: 'post' }
@@ -232,6 +329,12 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 22px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .eyebrow {
@@ -317,6 +420,11 @@ button.secondary {
   color: var(--text, #edf7ff);
 }
 
+button.small {
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
 .toolbar {
   display: grid;
   grid-template-columns: 1.4fr 0.7fr 0.8fr;
@@ -338,12 +446,46 @@ input, select {
   padding: 18px;
 }
 
-.demo-header {
+.demo-header,
+.upload-header {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: flex-end;
   margin-bottom: 16px;
+}
+
+.hud-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.hud-item span {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(237,247,255,0.72);
+}
+
+.hud-item strong {
+  font-size: 1rem;
+}
+
+.hud-item.accent strong {
+  color: #7ef0ff;
 }
 
 .game-canvas {
@@ -353,6 +495,15 @@ input, select {
   border-radius: 16px;
   border: 1px solid rgba(255,255,255,0.12);
   background: linear-gradient(180deg, #8ed4ff 0%, #d4f0ff 36%, #dfeccf 100%);
+}
+
+.upload-panel {
+  padding: 16px 18px;
+}
+
+.muted {
+  margin-top: 8px;
+  color: rgba(237,247,255,0.78);
 }
 
 .featured-grid,
@@ -505,7 +656,8 @@ input, select {
   }
 
   .hero-actions,
-  .detail-actions {
+  .detail-actions,
+  .header-actions {
     flex-direction: column;
   }
 
@@ -515,6 +667,10 @@ input, select {
 
   .stats-box {
     min-width: 0;
+  }
+
+  .hud-row {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
 }
 </style>

@@ -1,14 +1,16 @@
 # PQ-Web
 
-A clean-room TypeScript + Vue project for a PlatinumQuest-inspired web app with a Marbleland-style level browser and a mini playable marble platformer demo.
+A clean-room TypeScript + Vue project for a PlatinumQuest-inspired web app with a Marbleland-style level browser and a playable marble platformer demo.
 
 ## Features
 
 - Level browser front end inspired by Marbleland
 - Search, filters, featured cards, and level detail panel
 - Downloadable level JSON mock API
-- Mobile-friendly UI
+- Community upload flow for custom level JSON files
+- Mobile-friendly UI and responsive dashboard
 - Playable mini marble platformer demo in-browser
+- Multi-level progression, checkpoints, and HUD metrics
 - Pure JS/TS stack with Vite + Vue + Express
 
 ## Running locally
@@ -29,4 +31,4 @@ npm start
 
 ## Notes
 
-This is intentionally a clean-room implementation: it takes the shape of Marbleland’s level-sharing concepts and the feel of Marble Blast / PlatinumQuest gameplay, but does not copy the original codebase or engine.
+This is intentionally a clean-room implementation: it follows the general architecture and feel of Marble Blast / PlatinumQuest + Marbleland, but does not copy the original codebases or engine logic.

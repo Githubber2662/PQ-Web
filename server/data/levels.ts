@@ -15,7 +15,7 @@ export type LevelRecord = {
   createdAt: string;
 };
 
-export const levels: LevelRecord[] = [
+export const defaultLevels: LevelRecord[] = [
   {
     id: 'marble-bridge',
     name: 'Marble Bridge',
@@ -97,6 +97,11 @@ export const levels: LevelRecord[] = [
   }
 ];
 
-export const featuredLevels = levels.filter((level) => level.featured).slice(0, 3);
+export let levels: LevelRecord[] = [...defaultLevels];
 
+export const featuredLevels = () => levels.filter((level) => level.featured).slice(0, 3);
 export const levelById = (id: string) => levels.find((level) => level.id === id) ?? null;
+export const addUploadedLevel = (level: LevelRecord) => {
+  levels = [level, ...levels];
+  return level;
+};
