@@ -1,0 +1,36 @@
+{
+  "id": "demo-level",
+  "name": "Demo Level",
+  "size": { "x": 40, "z": 40 },
+  "spawn": { "x": 0, "y": 1, "z": 0 },
+  "goalPosition": { "x": 12, "y": 0, "z": 0 },
+  "entities": [
+    {
+      "type": "block",
+      "position": { "x": -5, "y": 1, "z": 3 },
+      "size": { "x": 3, "y": 2, "z": 3 },
+      "color": 12040119
+    },
+    {
+      "type": "block",
+      "position": { "x": 4, "y": 1, "z": -4 },
+      "size": { "x": 3, "y": 2, "z": 3 },
+      "color": 12040119
+    },
+    {
+      "type": "block",
+      "position": { "x": 9, "y": 1, "z": 4 },
+      "size": { "x": 4, "y": 2, "z": 2 },
+      "color": 12040119
+    }
+  ],
+  "gems": [
+    { "position": { "x": 2, "y": 1, "z": 0 } },
+    { "position": { "x": 6, "y": 1, "z": -3 } },
+    { "position": { "x": 10, "y": 1, "z": 3 } }
+  ],
+  "hazards": [
+    { "x": -8, "y": 1.2, "z": 0, "radius": 1.3 },
+    { "x": 7, "y": 1.2, "z": 1, "radius": 1.3 }
+  ]
+}
